@@ -1,0 +1,157 @@
+[
+    {
+        "type": "T1.1",
+        "name": "subject_explicit_extend",
+        "label": "V"
+    },
+    {
+        "type": "T1.2",
+        "name": "subject_implicit_expand",
+        "label": "V"
+    },
+    {
+        "type": "T1.3",
+        "name": "subject_reallocated_expand",
+        "label": "V"
+    },
+    {
+        "type": "T1.4",
+        "name": "subject_reallocated_reduce",
+        "label": "NV"
+    },
+    {
+        "type": "T1.5",
+        "name": "subject_explicit_reduce",
+        "label": "NV"
+    },
+    {
+        "type": "T1.6",
+        "name": "subject_implicit_reduce",
+        "label": "NV"
+    },
+    {
+        "type": "T2.1",
+        "name": "action_explicit_extend",
+        "label": "V"
+    },
+    {
+        "type": "T2.2",
+        "name": "action_implicit_expand",
+        "label": "V"
+    },
+    {
+        "type": "T2.3",
+        "name": "action_reallocated_expand",
+        "label": "V"
+    },
+    {
+        "type": "T2.4",
+        "name": "action_reallocated_reduce",
+        "label": "NV"
+    },
+    {
+        "type": "T2.5",
+        "name": "action_explicit_reduce",
+        "label": "NV"
+    },
+    {
+        "type": "T2.6",
+        "name": "action_implicit_reduce",
+        "label": "NV"
+    },
+    {
+        "type": "T3.1",
+        "name": "object_explicit_extend",
+        "label": "V"
+    },
+    {
+        "type": "T3.2",
+        "name": "object_implicit_expand",
+        "label": "V"
+    },
+    {
+        "type": "T3.3",
+        "name": "object_reallocated_expand",
+        "label": "V"
+    },
+    {
+        "type": "T3.4",
+        "name": "object_reallocated_reduce",
+        "label": "NV"
+    },
+    {
+        "type": "T3.5",
+        "name": "object_explicit_reduce",
+        "label": "NV"
+    },
+    {
+        "type": "T3.6",
+        "name": "object_implicit_reduce",
+        "label": "NV"
+    },
+    {
+        "type": "T4.1",
+        "name": "objCon_explicit_extend",
+        "label": "NV"
+    },
+    {
+        "type": "T4.2",
+        "name": "objCon_implicit_expand",
+        "label": "NV"
+    },
+    {
+        "type": "T4.3",
+        "name": "objCon_reallocated_expand",
+        "label": "NV"
+    },
+    {
+        "type": "T4.4",
+        "name": "objCon_reallocated_reduce",
+        "label": "V"
+    },
+    {
+        "type": "T4.5",
+        "name": "objCon_implicit_reduce",
+        "label": "V"
+    },
+    {
+        "type": "T4.6",
+        "name": "objCon_addition",
+        "label": "NV"
+    },
+    {
+        "type": "T4.7",
+        "name": "objCon_removal",
+        "label": "V"
+    },
+    {
+        "type": "T5.1",
+        "name": "sbCon_addition",
+        "label": "NV"
+    },
+    {
+        "type": "T5.2",
+        "name": "sbCon_removal",
+        "label": "V"
+    },
+    {
+        "type": "T6.1",
+        "name": "term_up",
+        "label": "TU"
+    },
+    {
+        "type": "T6.2",
+        "name": "term_down",
+        "label": "TD"
+    },
+    {
+        "type": "T6.3",
+        "name": "term_extremity_in",
+        "label": "XT"
+    },
+    {
+        "type": "T6.4",
+        "name": "term_extremity_out",
+        "label": "NX"
+    }
+]
