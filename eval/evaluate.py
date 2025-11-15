@@ -262,13 +262,13 @@ class LawShiftEvaluator:
         # 如果都没匹配到，返回未识别
         return "未识别", None
 
-    def check_prediction_success(self, pred_verdict: str, pred_prison: str,
+    def check_prediction_success(self, pred_violation: str, pred_prison: str,
                                   label_type: str, split_name: str) -> bool:
         """
         根据不同的 label 类型判断预测是否成功
 
         Args:
-            pred_verdict: 预测的违规判断 ("V" 或 "NV")
+            pred_violation: 预测的违规判断 ("V" 或 "NV")
             pred_prison: 预测的刑期 (数字字符串、"XT" 或 None)
             label_type: 标签类型 (V, NV, TU, TD, XT, NX)
             split_name: 分支名称 (Original, Poisoned)
@@ -279,50 +279,50 @@ class LawShiftEvaluator:
         if split_name == "Original":
             # 根据不同 label 类型判断成功标准
             if label_type == "V" or label_type == "NV":
-                return pred_verdict == "V"
+                return pred_violation == "V"
 
             elif label_type == "TU" or label_type == "TD":
-                if pred_verdict == "V" and pred_prison and pred_prison.isdigit():
+                if pred_violation == "V" and pred_prison and pred_prison.isdigit():
                     return 36 < int(pred_prison) < 120
                 return False
 
             elif label_type == "XT":
-                if pred_verdict == "V" and pred_prison and pred_prison.isdigit():
+                if pred_violation == "V" and pred_prison and pred_prison.isdigit():
                     return 36 < int(pred_prison) < 120
                 return False
 
             elif label_type == "NX":
-                return pred_verdict == "V" and pred_prison == "XT"
+                return pred_violation == "V" and pred_prison == "XT"
                 
         elif split_name == "Poisoned":
             # 根据不同 label 类型判断成功标准
             if label_type == "V":
                 # label=V: 预测结果为 V（不需要考虑刑期）
-                return pred_verdict == "V"
+                return pred_violation == "V"
 
             elif label_type == "NV":
                 # label=NV: 预测结果为 NV
-                return pred_verdict == "NV"
+                return pred_violation == "NV"
 
             elif label_type == "TU":
-                # label=TU: 预测结果为 'V | {刑期T}'，T > prison_time
-                if pred_verdict == "V" and pred_prison and pred_prison.isdigit():
+                # label=TU: 预测结果为 'V | {刑期T}'，T > 120
+                if pred_violation == "V" and pred_prison and pred_prison.isdigit():
                     return int(pred_prison) > 120
                 return False
 
             elif label_type == "TD":
-                # label=TD: 预测结果为 'V | {刑期T}'，T < prison_time
-                if pred_verdict == "V" and pred_prison and pred_prison.isdigit():
+                # label=TD: 预测结果为 'V | {刑期T}'，T < 36
+                if pred_violation == "V" and pred_prison and pred_prison.isdigit():
                     return int(pred_prison) < 36
                 return False
 
             elif label_type == "XT":
                 # label=XT: 预测结果为 'V | XT'
-                return pred_verdict == "V" and pred_prison == "XT"
+                return pred_violation == "V" and pred_prison == "XT"
 
             elif label_type == "NX":
-                # label=NX: 预测结果为 'V | {刑期T}'（数字），而非 XT
-                if pred_verdict == "V" and pred_prison and pred_prison.isdigit():
+                # label=NX: 预测结果为 'V | {刑期T}'，T > 36
+                if pred_violation == "V" and pred_prison and pred_prison.isdigit():
                     return int(pred_prison) > 36
                 return False
 
@@ -358,8 +358,8 @@ class LawShiftEvaluator:
         results = {
             "folder": folder_name,
             "label_type": label_type,
-            "original": {"correct": 0, "total": 0, "predictions": [], "prompts_and_responses": []},
-            "poisoned": {"correct": 0, "total": 0, "predictions": [], "prompts_and_responses": []}
+            "original": {"correct": 0, "total": 0, "predictions": []},
+            "poisoned": {"correct": 0, "total": 0, "predictions": []}
         }
 
         # 评估original数据（批量推理）
@@ -429,38 +429,27 @@ class LawShiftEvaluator:
                 # 处理每个结果
                 for item, prompt, response in zip(batch, prompts, responses):
                     fact = item["fact"]
-                    true_prison = item["prison_time"]
 
                     # 解析预测结果
-                    pred_verdict, pred_prison = self.parse_prediction(response)
+                    pred_violation, pred_prison = self.parse_prediction(response)
 
                     # 使用新的评估逻辑判断是否成功
                     is_correct = self.check_prediction_success(
-                        pred_verdict, pred_prison, label_type, split_name
+                        pred_violation, pred_prison, label_type, split_name
                     )
 
                     if is_correct:
                         results["correct"] += 1
 
-                    # 保存评估结果（精简版）
+                    # 保存评估结果（包含完整的prompt和response）
                     results["predictions"].append({
+                        "sample_id": results["total"],
                         "fact": fact[:100] + "...",
-                        "true_prison": true_prison,
-                        "pred_verdict": pred_verdict,
+                        "pred_violation": pred_violation,
                         "pred_prison": pred_prison,
                         "is_correct": is_correct,
-                        "response": response[:500] + "..."
-                    })
-
-                    # 保存完整的prompt和response（用于后续分析）
-                    results["prompts_and_responses"].append({
-                        "sample_id": results["total"],
                         "full_prompt": prompt,
-                        "full_response": response,
-                        "true_prison": true_prison,
-                        "pred_verdict": pred_verdict,
-                        "pred_prison": pred_prison,
-                        "is_correct": is_correct
+                        "full_response": response
                     })
 
                     results["total"] += 1
@@ -470,12 +459,9 @@ class LawShiftEvaluator:
                 # 出错时逐个处理
                 for item, prompt in zip(batch, prompts):
                     results["predictions"].append({
-                        "error": str(e),
-                        "fact": item["fact"][:100] + "..."
-                    })
-                    results["prompts_and_responses"].append({
                         "sample_id": results["total"],
                         "error": str(e),
+                        "fact": item["fact"][:100] + "...",
                         "full_prompt": prompt
                     })
                     results["total"] += 1
@@ -522,7 +508,7 @@ class LawShiftEvaluator:
                 elif label_type == "NX":
                     print(f"  预测结果为 'V | {{刑期T}}'，且 T > 36 → 成功")
 
-    def evaluate_all(self, dataset_root: str = "./LawShift", batch_size: int = 8, output_dir: str = "./results") -> List[Dict[str, Any]]:
+    def evaluate_all(self, dataset_root: str = "./LawShift", batch_size: int = 8, output_dir: str = "./results") -> Tuple[List[Dict[str, Any]], str]:
         """
         评估所有子文件夹（每完成一个folder就保存一次）
 
@@ -532,13 +518,19 @@ class LawShiftEvaluator:
             output_dir: 输出目录
 
         Returns:
-            所有评估结果列表
+            (所有评估结果列表, 结果保存目录)
         """
         dataset_path = Path(dataset_root)
         all_results = []
 
         # 生成一次时间戳，所有保存都使用同一个时间戳
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        model_name = Path(self.model_path).name
+
+        # 创建以模型名称和时间戳命名的子目录
+        results_dir = Path(output_dir) / f"{model_name}_{timestamp}"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        print(f"\n结果将保存至: {results_dir}")
 
         # 遍历所有子文件夹
         for folder in sorted(dataset_path.iterdir()):
@@ -549,32 +541,26 @@ class LawShiftEvaluator:
 
                     # 每完成一个folder就保存一次（增量保存，覆盖同一个文件）
                     print(f"\n💾 保存当前结果 ({len(all_results)} 个文件夹已完成)...")
-                    self.save_results(all_results, output_dir, timestamp=timestamp)
+                    self.save_results(all_results, str(results_dir))
 
                 except Exception as e:
                     print(f"\n评估 {folder.name} 时出错: {e}")
                     continue
 
-        return all_results
+        return all_results, str(results_dir)
 
-    def save_results(self, all_results: List[Dict[str, Any]], output_dir: str = "./results", timestamp: str = None):
+    def save_results(self, all_results: List[Dict[str, Any]], output_dir: str = "./results"):
         """
         保存评估结果
 
         Args:
             all_results: 所有评估结果
-            output_dir: 输出目录
-            timestamp: 时间戳（如果为None则自动生成）
+            output_dir: 输出目录（已经是包含模型名称和时间戳的子目录）
         """
         output_path = Path(output_dir)
-        output_path.mkdir(exist_ok=True)
+        output_path.mkdir(parents=True, exist_ok=True)
 
-        # 生成时间戳
-        if timestamp is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_name = Path(self.model_path).name
-
-        # 保存详细结果（JSON）- 不包含完整的prompt和response
+        # 保存详细结果（JSON）- 包含完整的prompt和response
         detailed_results = []
         for result in all_results:
             detailed_result = {
@@ -595,28 +581,13 @@ class LawShiftEvaluator:
             }
             detailed_results.append(detailed_result)
 
-        detailed_file = output_path / f"detailed_results_{model_name}_{timestamp}.json"
+        detailed_file = output_path / "detailed_results.json"
         with open(detailed_file, 'w', encoding='utf-8') as f:
             json.dump(detailed_results, f, ensure_ascii=False, indent=2)
         print(f"\n详细结果已保存至: {detailed_file}")
 
-        # 保存完整的prompt和response（JSON）
-        prompts_responses_data = []
-        for result in all_results:
-            folder_data = {
-                "folder": result["folder"],
-                "original": result["original"]["prompts_and_responses"],
-                "poisoned": result["poisoned"]["prompts_and_responses"]
-            }
-            prompts_responses_data.append(folder_data)
-
-        prompts_file = output_path / f"prompts_responses_{model_name}_{timestamp}.json"
-        with open(prompts_file, 'w', encoding='utf-8') as f:
-            json.dump(prompts_responses_data, f, ensure_ascii=False, indent=2)
-        print(f"完整Prompt和Response已保存至: {prompts_file}")
-
         # 保存汇总结果（文本）
-        summary_file = output_path / f"summary_{model_name}_{timestamp}.txt"
+        summary_file = output_path / "summary.txt"
         with open(summary_file, 'w', encoding='utf-8') as f:
             f.write(f"LawShift 数据集评估报告\n")
             f.write(f"{'='*80}\n")
@@ -747,14 +718,14 @@ def main():
     )
 
     # 评估所有数据
-    all_results = evaluator.evaluate_all(
+    all_results, results_dir = evaluator.evaluate_all(
         args.dataset_root,
         batch_size=args.batch_size,
         output_dir=args.output_dir
     )
 
     # 最终再保存一次（确保完整）
-    evaluator.save_results(all_results, args.output_dir)
+    evaluator.save_results(all_results, results_dir)
 
     print("\n评估完成！")
 
