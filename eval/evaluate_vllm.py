@@ -479,14 +479,13 @@ class LawShiftEvaluatorVLLM:
             json.dump(detailed_results, f, ensure_ascii=False, indent=2)
         print(f"\n详细结果已保存至: {detailed_file}")
 
-        # 保存汇总结果（文本）
-        summary_file = output_path / "summary.txt"
+        # 保存汇总结果（Markdown）
+        summary_file = output_path / "summary.md"
         with open(summary_file, 'w', encoding='utf-8') as f:
-            f.write(f"LawShift 数据集评估报告 (vLLM版本)\n")
-            f.write(f"{'='*80}\n")
-            f.write(f"模型路径: {self.model_path}\n")
-            f.write(f"评估时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"{'='*80}\n\n")
+            # 标题和基本信息
+            f.write(f"# LawShift 数据集评估报告 (vLLM版本)\n\n")
+            f.write(f"**模型路径**: {self.model_path}\n\n")
+            f.write(f"**评估时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
 
             # 统计总体结果
             total_orig_correct = 0
@@ -494,32 +493,31 @@ class LawShiftEvaluatorVLLM:
             total_pois_correct = 0
             total_pois_count = 0
 
+            # 各文件夹评估结果表格
+            f.write(f"## 各文件夹评估结果\n\n")
+            f.write(f"| 文件夹名称 | Label Type | Original | Poisoned | Comparison |\n")
+            f.write(f"|-----------|-----------|----------|----------|------------|\n")
+
             for results in all_results:
                 folder_name = results["folder"]
-                label_type = results.get("label_type")
-                f.write(f"\n{'='*80}\n")
-                f.write(f"文件夹: {folder_name}\n")
-                if label_type:
-                    f.write(f"标签类型: {label_type}\n")
-                f.write(f"{'='*80}\n")
+                label_type = results.get("label_type", "")
 
                 # Original结果
                 orig = results["original"]
-                f.write(f"\n【Original数据】\n")
-                f.write(f"  总数: {orig['total']}\n")
-                f.write(f"  成功率: {orig.get('accuracy', 0):.2%} ({orig['correct']}/{orig['total']})\n")
+                orig_text = f"{orig['correct']}/{orig['total']} ({orig.get('accuracy', 0):.2%})"
 
                 # Poisoned结果
                 pois = results["poisoned"]
-                f.write(f"\n【Poisoned数据】\n")
-                f.write(f"  总数: {pois['total']}\n")
-                f.write(f"  成功率: {pois.get('accuracy', 0):.2%} ({pois['correct']}/{pois['total']})\n")
+                pois_text = f"{pois['correct']}/{pois['total']} ({pois.get('accuracy', 0):.2%})"
 
                 # 对比分析
+                comparison_text = ""
                 if orig['total'] > 0 and pois['total'] > 0:
                     accuracy_diff = pois.get('accuracy', 0) - orig.get('accuracy', 0)
-                    f.write(f"\n【对比分析】\n")
-                    f.write(f"  成功率变化: {accuracy_diff:+.2%}\n")
+                    comparison_text = f"{accuracy_diff:+.2%}"
+
+                # 写入表格行
+                f.write(f"| {folder_name} | {label_type} | {orig_text} | {pois_text} | {comparison_text} |\n")
 
                 # 累加统计
                 total_orig_correct += orig['correct']
@@ -527,26 +525,18 @@ class LawShiftEvaluatorVLLM:
                 total_pois_correct += pois['correct']
                 total_pois_count += pois['total']
 
-            # 总体统计
-            f.write(f"\n\n{'='*80}\n")
-            f.write(f"总体统计\n")
-            f.write(f"{'='*80}\n")
-
-            if total_orig_count > 0:
-                orig_acc = total_orig_correct / total_orig_count
-                f.write(f"\n【Original数据总体】\n")
-                f.write(f"  总数: {total_orig_count}\n")
-                f.write(f"  成功率: {orig_acc:.2%} ({total_orig_correct}/{total_orig_count})\n")
-
-            if total_pois_count > 0:
-                pois_acc = total_pois_correct / total_pois_count
-                f.write(f"\n【Poisoned数据总体】\n")
-                f.write(f"  总数: {total_pois_count}\n")
-                f.write(f"  成功率: {pois_acc:.2%} ({total_pois_correct}/{total_pois_count})\n")
+            # 总体统计表格
+            f.write(f"\n## 总体统计\n\n")
+            f.write(f"| 文件夹名称 | Label Type | Original | Poisoned | Comparison |\n")
+            f.write(f"|-----------|-----------|----------|----------|------------|\n")
 
             if total_orig_count > 0 and total_pois_count > 0:
-                f.write(f"\n【总体对比】\n")
-                f.write(f"  成功率变化: {(pois_acc - orig_acc):+.2%}\n")
+                orig_acc = total_orig_correct / total_orig_count
+                pois_acc = total_pois_correct / total_pois_count
+                orig_text = f"{total_orig_correct}/{total_orig_count} ({orig_acc:.2%})"
+                pois_text = f"{total_pois_correct}/{total_pois_count} ({pois_acc:.2%})"
+                comparison_text = f"{(pois_acc - orig_acc):+.2%}"
+                f.write(f"| **总体** | | {orig_text} | {pois_text} | {comparison_text} |\n")
 
         print(f"汇总结果已保存至: {summary_file}")
 
