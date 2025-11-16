@@ -1,6 +1,7 @@
 """
-拒绝采样脚本
+拒绝采样脚本 - vLLM版本
 对training_set.json中的每个样本并行采样8条回复，筛选出罪名和刑期均正确的回复作为SFT训练样本
+使用vLLM加速推理
 """
 
 import json
@@ -9,10 +10,8 @@ import argparse
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 from datetime import datetime
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from vllm import LLM, SamplingParams
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor
 import sys
 
 # 添加父目录到路径
@@ -26,66 +25,47 @@ class RejectionSampler:
     def __init__(
         self,
         model_path: str,
-        device: str = "auto",
         num_samples: int = 8,
         temperature: float = 0.8,
         top_p: float = 0.95,
-        max_new_tokens: int = 2048
+        max_new_tokens: int = 2048,
+        tensor_parallel_size: int = 1,
+        gpu_memory_utilization: float = 0.9
     ):
         """
-        初始化拒绝采样器
+        初始化拒绝采样器（使用vLLM）
 
         Args:
             model_path: 模型路径
-            device: 设备类型
             num_samples: 每个样本采样的回复数量
             temperature: 采样温度
             top_p: nucleus sampling参数
             max_new_tokens: 最大生成token数
+            tensor_parallel_size: 张量并行大小（多GPU时使用）
+            gpu_memory_utilization: GPU显存利用率 (0.0-1.0)
         """
-        print(f"正在加载模型: {model_path}")
+        print(f"正在加载模型 (vLLM): {model_path}")
         self.model_path = model_path
-        self.device = device
         self.num_samples = num_samples
         self.temperature = temperature
         self.top_p = top_p
         self.max_new_tokens = max_new_tokens
 
-        # 加载 tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_path,
-            trust_remote_code=True,
-            padding_side="left"
-        )
-
-        # 设置 pad_token
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-
-        # 加载模型
+        # 使用 vLLM 加载模型
         print("加载模型中...")
-        model_kwargs = {
-            "trust_remote_code": True,
-            "device_map": device,
-        }
-
-        # 自动选择最佳精度
-        if torch.cuda.is_available():
-            if torch.cuda.is_bf16_supported():
-                model_kwargs["torch_dtype"] = torch.bfloat16
-                print("使用 BF16 精度")
-            else:
-                model_kwargs["torch_dtype"] = torch.float16
-                print("使用 FP16 精度")
-
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            **model_kwargs
+        self.llm = LLM(
+            model=model_path,
+            tensor_parallel_size=tensor_parallel_size,
+            gpu_memory_utilization=gpu_memory_utilization,
+            trust_remote_code=True,
         )
 
-        self.model.eval()
+        # 获取 tokenizer（用于构建 prompt）
+        self.tokenizer = self.llm.get_tokenizer()
+
         print("模型加载完成！")
+        print(f"张量并行大小: {tensor_parallel_size}")
+        print(f"GPU显存利用率: {gpu_memory_utilization}")
 
     def parse_answer(self, response: str) -> Optional[Tuple[str, str]]:
         """
@@ -192,7 +172,7 @@ class RejectionSampler:
         article_ids: List[str]
     ) -> List[str]:
         """
-        为单个样本生成多个回复
+        为单个样本生成多个回复（使用vLLM）
 
         Args:
             fact: 案件事实
@@ -218,34 +198,19 @@ class RejectionSampler:
             add_generation_prompt=True
         )
 
-        # 编码
-        inputs = self.tokenizer(
-            [prompt] * self.num_samples,  # 批量生成
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=4096
-        ).to(self.model.device)
+        # 设置采样参数
+        sampling_params = SamplingParams(
+            temperature=self.temperature,
+            top_p=self.top_p,
+            max_tokens=self.max_new_tokens,
+            n=self.num_samples,  # 生成多个候选回复
+        )
 
-        # 生成回复
-        with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=self.max_new_tokens,
-                temperature=self.temperature,
-                top_p=self.top_p,
-                do_sample=True,
-                pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id,
-            )
+        # 使用 vLLM 生成
+        outputs = self.llm.generate([prompt], sampling_params)
 
-        # 解码
-        responses = []
-        for i in range(self.num_samples):
-            # 只保留生成的部分
-            generated_ids = outputs[i][inputs['input_ids'].shape[1]:]
-            response = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
-            responses.append(response)
+        # 提取生成的文本
+        responses = [output.text for output in outputs[0].outputs]
 
         return responses
 
@@ -355,7 +320,7 @@ def load_articles(articles_path: str) -> Dict[str, str]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="拒绝采样脚本")
+    parser = argparse.ArgumentParser(description="拒绝采样脚本 (vLLM版本)")
     parser.add_argument("--model_path", type=str, required=True, help="模型路径")
     parser.add_argument("--training_data", type=str, default="LawShift/training_set.json", help="训练数据路径")
     parser.add_argument("--articles", type=str, required=True, help="法条数据路径（articles_original.json）")
@@ -363,8 +328,9 @@ def main():
     parser.add_argument("--num_samples", type=int, default=8, help="每个样本采样的回复数量")
     parser.add_argument("--temperature", type=float, default=0.8, help="采样温度")
     parser.add_argument("--top_p", type=float, default=0.95, help="nucleus sampling参数")
-    parser.add_argument("--device", type=str, default="auto", help="设备类型")
     parser.add_argument("--max_new_tokens", type=int, default=2048, help="最大生成token数")
+    parser.add_argument("--tensor_parallel_size", type=int, default=1, help="张量并行大小（多GPU时使用）")
+    parser.add_argument("--gpu_memory_utilization", type=float, default=0.9, help="GPU显存利用率 (0.0-1.0)")
 
     args = parser.parse_args()
 
@@ -381,11 +347,12 @@ def main():
     # 初始化采样器
     sampler = RejectionSampler(
         model_path=args.model_path,
-        device=args.device,
         num_samples=args.num_samples,
         temperature=args.temperature,
         top_p=args.top_p,
-        max_new_tokens=args.max_new_tokens
+        max_new_tokens=args.max_new_tokens,
+        tensor_parallel_size=args.tensor_parallel_size,
+        gpu_memory_utilization=args.gpu_memory_utilization
     )
 
     # 执行采样

@@ -1,0 +1,4 @@
+vllm
+deepspeed
+flash_attn
+nvitop
