@@ -334,14 +334,14 @@ class LawShiftEvaluatorVLLM:
                     if is_correct:
                         results["correct"] += 1
 
-                    # 保存评估结果（包含完整的prompt和response）
+                    # 保存评估结果（保存完整的fact和related_articles）
                     results["predictions"].append({
                         "sample_id": results["total"],
-                        "fact": fact[:100] + "...",
                         "pred_violation": pred_violation,
                         "pred_prison": pred_prison,
                         "is_correct": is_correct,
-                        "full_prompt": prompt,
+                        "fact": fact,
+                        "relevant_articles": item["relevant_articles"],
                         "full_response": response
                     })
 
@@ -354,8 +354,8 @@ class LawShiftEvaluatorVLLM:
                     results["predictions"].append({
                         "sample_id": results["total"],
                         "error": str(e),
-                        "fact": item["fact"][:100] + "...",
-                        "full_prompt": prompt
+                        "fact": item["fact"],
+                        "relevant_articles": item["relevant_articles"]
                     })
                     results["total"] += 1
 
