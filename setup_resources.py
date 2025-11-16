@@ -75,25 +75,25 @@ def main():
 
     # 定义要执行的命令列表
     commands = [
+        # {
+        #     'cmd': 'export HF_ENDPOINT=http://192.168.50.202:18090 >> ~/.bashrc',
+        #     'desc': '设置 HuggingFace 镜像端点'
+        # },
+        # {
+        #     'cmd': f'export WANDB_API_KEY={WANDB_API_KEY} >> ~/.bashrc',
+        #     'desc': '设置 Weights & Biases API Key'
+        # },
+        # {
+        #     'cmd': f"huggingface-cli download Qwen/Qwen3-0.6B --local-dir /root/LawShiftLLM/models/Qwen3-0.6B",
+        #     'desc': '下载 Qwen3-0.6B 模型'
+        # },
         {
-            'cmd': 'export HF_ENDPOINT="https://hf-mirror.com"',
-            'desc': '设置 HuggingFace 镜像端点'
-        },
-        {
-            'cmd': f'export WANDB_API_KEY={WANDB_API_KEY}',
-            'desc': '设置 Weights & Biases API Key'
-        },
-        {
-            'cmd': f"huggingface-cli download --token {hf_token} Qwen/Qwen3-0.6B --local-dir /root/LawShiftLLM/models/Qwen3-0.6B",
-            'desc': '下载 Qwen3-0.6B 模型'
-        },
-        {
-            'cmd': f"huggingface-cli download --token {hf_token} Qwen/Qwen2.5-7B-Instruct --local-dir /root/LawShiftLLM/models/Qwen2.5-7B-Instruct",
-            'desc': '下载 Qwen2.5-7B-Instruct 模型'
-        },
-        {
-            'cmd': f"huggingface-cli download --token {hf_token} --repo-type dataset triangularPeach/LawShift --local-dir /root/LawShiftLLM/LawShift",
+            'cmd': f"huggingface-cli download --repo-type dataset triangularPeach/LawShift --local-dir /root/LawShiftLLM/LawShift",
             'desc': '下载 LawShift 数据集'
+        },
+        {
+            'cmd': f"huggingface-cli download Qwen/Qwen2.5-7B-Instruct --local-dir /root/LawShiftLLM/models/Qwen2.5-7B-Instruct",
+            'desc': '下载 Qwen2.5-7B-Instruct 模型'
         }
     ]
 
