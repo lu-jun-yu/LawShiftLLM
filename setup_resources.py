@@ -26,38 +26,30 @@ def load_tokens(token_file='token.json'):
 
 
 def execute_command(command, description=""):
-    """执行单个命令并显示结果"""
+    """执行单个命令并实时显示输出"""
     if description:
         print(f"\n{'='*60}")
         print(f"执行: {description}")
         print(f"{'='*60}")
 
     print(f"命令: {command}")
+    print()  # 空行，让输出更清晰
 
     try:
+        # 不捕获输出，让命令的输出直接显示到终端
+        # 这样可以看到实时进度（如下载进度条）
         result = subprocess.run(
             command,
             shell=True,
-            check=True,
-            text=True,
-            capture_output=True
+            check=True
         )
 
-        if result.stdout:
-            print(result.stdout)
-        if result.stderr:
-            print(result.stderr)
-
-        print(f"✓ 完成: {description if description else command}")
+        print(f"\n✓ 完成: {description if description else command}")
         return True
 
     except subprocess.CalledProcessError as e:
-        print(f"✗ 错误: 命令执行失败")
+        print(f"\n✗ 错误: 命令执行失败")
         print(f"返回码: {e.returncode}")
-        if e.stdout:
-            print(f"标准输出: {e.stdout}")
-        if e.stderr:
-            print(f"错误输出: {e.stderr}")
         return False
 
 
