@@ -4,3 +4,4 @@ LawShift/.cache
 models/*
 LawShift/
 token.json
+results/*/detailed_results.json
