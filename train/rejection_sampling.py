@@ -28,7 +28,7 @@ class RejectionSampler:
         num_samples: int = 8,
         temperature: float = 0.8,
         top_p: float = 0.95,
-        max_new_tokens: int = 2048,
+        max_new_tokens: int = 1024,
         tensor_parallel_size: int = 1,
         gpu_memory_utilization: float = 0.9
     ):
@@ -328,7 +328,7 @@ def main():
     parser.add_argument("--num_samples", type=int, default=8, help="每个样本采样的回复数量")
     parser.add_argument("--temperature", type=float, default=0.8, help="采样温度")
     parser.add_argument("--top_p", type=float, default=0.95, help="nucleus sampling参数")
-    parser.add_argument("--max_new_tokens", type=int, default=2048, help="最大生成token数")
+    parser.add_argument("--max_new_tokens", type=int, default=1024, help="最大生成token数")
     parser.add_argument("--tensor_parallel_size", type=int, default=1, help="张量并行大小（多GPU时使用）")
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.9, help="GPU显存利用率 (0.0-1.0)")
 

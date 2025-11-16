@@ -92,7 +92,7 @@ class LawShiftEvaluatorVLLM:
         return articles_original, articles_poisoned, data_original, data_poisoned
 
     def generate_predictions_batch(self, prompts: List[str], temperature: float = 0.7,
-                                   top_p: float = 0.9, max_tokens: int = 512) -> List[str]:
+                                   top_p: float = 0.9, max_tokens: int = 1024) -> List[str]:
         """
         批量生成预测（使用vLLM）
 
