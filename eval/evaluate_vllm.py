@@ -483,7 +483,7 @@ class LawShiftEvaluatorVLLM:
         summary_file = output_path / "summary.md"
         with open(summary_file, 'w', encoding='utf-8') as f:
             # 标题和基本信息
-            f.write(f"# LawShift 数据集评估报告 (vLLM版本)\n\n")
+            f.write(f"# LawShift 数据集评估报告\n\n")
             f.write(f"**模型路径**: {self.model_path}\n\n")
             f.write(f"**评估时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
 
@@ -566,7 +566,7 @@ def main():
         "--batch_size",
         type=int,
         default=32,
-        help="批量推理的batch size（vLLM会自动优化）"
+        help="批量推理的batch size"
     )
     parser.add_argument(
         "--tensor_parallel_size",
