@@ -283,17 +283,17 @@ class LawShiftEvaluator:
 
             elif label_type == "TU" or label_type == "TD":
                 if pred_violation == "V" and pred_prison and pred_prison.isdigit():
-                    return 36 < int(pred_prison) < 120
+                    return 36 <= int(pred_prison) <= 120
                 return False
 
             elif label_type == "XT":
                 if pred_violation == "V" and pred_prison and pred_prison.isdigit():
-                    return 36 < int(pred_prison) < 120
+                    return 36 <= int(pred_prison) <= 120
                 return False
 
             elif label_type == "NX":
                 return pred_violation == "V" and pred_prison == "XT"
-                
+
         elif split_name == "Poisoned":
             # 根据不同 label 类型判断成功标准
             if label_type == "V":
@@ -307,13 +307,13 @@ class LawShiftEvaluator:
             elif label_type == "TU":
                 # label=TU: 预测结果为 'V | {刑期T}'，T > 120
                 if pred_violation == "V" and pred_prison and pred_prison.isdigit():
-                    return int(pred_prison) > 120
+                    return int(pred_prison) >= 120
                 return False
 
             elif label_type == "TD":
                 # label=TD: 预测结果为 'V | {刑期T}'，T < 36
                 if pred_violation == "V" and pred_prison and pred_prison.isdigit():
-                    return int(pred_prison) < 36
+                    return int(pred_prison) <= 36
                 return False
 
             elif label_type == "XT":
@@ -323,7 +323,7 @@ class LawShiftEvaluator:
             elif label_type == "NX":
                 # label=NX: 预测结果为 'V | {刑期T}'，T > 36
                 if pred_violation == "V" and pred_prison and pred_prison.isdigit():
-                    return int(pred_prison) > 36
+                    return int(pred_prison) >= 36
                 return False
 
         # 未知 label 类型
