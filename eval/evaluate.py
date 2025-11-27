@@ -329,13 +329,14 @@ class LawShiftEvaluator:
         # 未知 label 类型
         return False
 
-    def evaluate_dataset(self, folder_path: str, batch_size: int = 8) -> Dict[str, Any]:
+    def evaluate_dataset(self, folder_path: str, batch_size: int = 8, evaluate_type: str = "all") -> Dict[str, Any]:
         """
         评估指定文件夹的数据集（使用批量推理）
 
         Args:
             folder_path: 文件夹路径
             batch_size: 批量大小
+            evaluate_type: 评估类型 (original/poisoned/all)
 
         Returns:
             评估结果字典
@@ -345,14 +346,12 @@ class LawShiftEvaluator:
         print(f"正在评估: {folder_name}")
         print(f"{'='*60}")
 
-        # 从 label_mapping 中获取该文件夹的 label 类型
         label_type = self.label_mapping.get(folder_name, None)
         if label_type:
             print(f"标签类型: {label_type}")
         else:
             print(f"警告: 未找到文件夹 '{folder_name}' 的标签类型")
 
-        # 加载数据
         articles_orig, articles_pois, data_orig, data_pois = self.load_data(folder_path)
 
         results = {
@@ -362,13 +361,13 @@ class LawShiftEvaluator:
             "poisoned": {"correct": 0, "total": 0, "predictions": []}
         }
 
-        # 评估original数据（批量推理）
-        print(f"\n评估 original.json (共{len(data_orig)}条)")
-        self._evaluate_split(data_orig, articles_orig, results["original"], batch_size, "Original", label_type)
+        if evaluate_type in ["original", "all"]:
+            print(f"\n评估 original.json (共{len(data_orig)}条)")
+            self._evaluate_split(data_orig, articles_orig, results["original"], batch_size, "Original", label_type)
 
-        # 评估poisoned数据（批量推理）
-        print(f"\n评估 poisoned.json (共{len(data_pois)}条)")
-        self._evaluate_split(data_pois, articles_pois, results["poisoned"], batch_size, "Poisoned", label_type)
+        if evaluate_type in ["poisoned", "all"]:
+            print(f"\n评估 poisoned.json (共{len(data_pois)}条)")
+            self._evaluate_split(data_pois, articles_pois, results["poisoned"], batch_size, "Poisoned", label_type)
 
         # 计算准确率
         if results["original"]["total"] > 0:
@@ -391,14 +390,12 @@ class LawShiftEvaluator:
             articles: 法条字典
             results: 结果字典
             batch_size: 批量大小
-            split_name: 分割名称（用于进度条）
-            label_type: 标签类型（V, NV, TU, TD, XT, NX）
+            split_name: 分割名称
+            label_type: 标签类型
         """
-        # 批量处理
         for i in tqdm(range(0, len(data), batch_size), desc=split_name):
             batch = data[i:i + batch_size]
 
-            # 准备批量提示词
             prompts = []
             for item in batch:
                 fact = item["fact"]
@@ -422,18 +419,15 @@ class LawShiftEvaluator:
 
                 prompts.append(prompt)
 
-            # 批量生成
             try:
                 responses = self.generate_predictions_batch(prompts)
 
-                # 处理每个结果
                 for item, prompt, response in zip(batch, prompts, responses):
                     fact = item["fact"]
+                    article_ids = item["relevant_articles"]
 
-                    # 解析预测结果
                     pred_violation, pred_prison = self.parse_prediction(response)
 
-                    # 使用新的评估逻辑判断是否成功
                     is_correct = self.check_prediction_success(
                         pred_violation, pred_prison, label_type, split_name
                     )
@@ -441,14 +435,16 @@ class LawShiftEvaluator:
                     if is_correct:
                         results["correct"] += 1
 
-                    # 保存评估结果（保存完整的fact和related_articles）
+                    relevant_articles_texts = [articles.get(str(aid), f"Article {aid} not found") for aid in article_ids]
+
                     results["predictions"].append({
                         "sample_id": results["total"],
                         "pred_violation": pred_violation,
                         "pred_prison": pred_prison,
                         "is_correct": is_correct,
                         "fact": fact,
-                        "relevant_articles": item["relevant_articles"],
+                        "relevant_articles": relevant_articles_texts,
+                        "full_prompt": prompt,
                         "full_response": response
                     })
 
@@ -456,13 +452,16 @@ class LawShiftEvaluator:
 
             except Exception as e:
                 print(f"\n批量预测出错: {e}")
-                # 出错时逐个处理
                 for item, prompt in zip(batch, prompts):
+                    article_ids = item["relevant_articles"]
+                    relevant_articles_texts = [articles.get(str(aid), f"Article {aid} not found") for aid in article_ids]
+
                     results["predictions"].append({
                         "sample_id": results["total"],
                         "error": str(e),
                         "fact": item["fact"],
-                        "relevant_articles": item["relevant_articles"]
+                        "relevant_articles": relevant_articles_texts,
+                        "full_prompt": prompt
                     })
                     results["total"] += 1
 
@@ -508,14 +507,15 @@ class LawShiftEvaluator:
                 elif label_type == "NX":
                     print(f"  预测结果为 'V | {{刑期T}}'，且 T > 36 → 成功")
 
-    def evaluate_all(self, dataset_root: str = "./LawShift", batch_size: int = 8, output_dir: str = "./results") -> Tuple[List[Dict[str, Any]], str]:
+    def evaluate_all(self, dataset_root: str = "./LawShift", batch_size: int = 8, output_dir: str = "./results", evaluate_type: str = "all") -> Tuple[List[Dict[str, Any]], str]:
         """
-        评估所有子文件夹（每完成一个folder就保存一次）
+        评估所有子文件夹
 
         Args:
             dataset_root: 数据集根目录
             batch_size: 批量大小
             output_dir: 输出目录
+            evaluate_type: 评估类型 (original/poisoned/all)
 
         Returns:
             (所有评估结果列表, 结果保存目录)
@@ -523,23 +523,19 @@ class LawShiftEvaluator:
         dataset_path = Path(dataset_root)
         all_results = []
 
-        # 生成一次时间戳，所有保存都使用同一个时间戳
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         model_name = Path(self.model_path).name
 
-        # 创建以模型名称和时间戳命名的子目录
         results_dir = Path(output_dir) / f"{model_name}_{timestamp}"
         results_dir.mkdir(parents=True, exist_ok=True)
         print(f"\n结果将保存至: {results_dir}")
 
-        # 遍历所有子文件夹
         for folder in sorted(dataset_path.iterdir()):
             if folder.is_dir() and (folder / "original.json").exists():
                 try:
-                    results = self.evaluate_dataset(str(folder), batch_size=batch_size)
+                    results = self.evaluate_dataset(str(folder), batch_size=batch_size, evaluate_type=evaluate_type)
                     all_results.append(results)
 
-                    # 每完成一个folder就保存一次（增量保存，覆盖同一个文件）
                     print(f"\n💾 保存当前结果 ({len(all_results)} 个文件夹已完成)...")
                     self.save_results(all_results, str(results_dir))
 
@@ -555,16 +551,15 @@ class LawShiftEvaluator:
 
         Args:
             all_results: 所有评估结果
-            output_dir: 输出目录（已经是包含模型名称和时间戳的子目录）
+            output_dir: 输出目录
         """
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # 保存详细结果（JSON）- 包含完整的prompt和response
-        detailed_results = []
         for result in all_results:
-            detailed_result = {
-                "folder": result["folder"],
+            folder_name = result["folder"]
+            folder_result = {
+                "folder": folder_name,
                 "label_type": result.get("label_type"),
                 "original": {
                     "correct": result["original"]["correct"],
@@ -579,28 +574,23 @@ class LawShiftEvaluator:
                     "predictions": result["poisoned"]["predictions"]
                 }
             }
-            detailed_results.append(detailed_result)
 
-        detailed_file = output_path / "detailed_results.json"
-        with open(detailed_file, 'w', encoding='utf-8') as f:
-            json.dump(detailed_results, f, ensure_ascii=False, indent=2)
-        print(f"\n详细结果已保存至: {detailed_file}")
+            result_file = output_path / f"{folder_name}_results.json"
+            with open(result_file, 'w', encoding='utf-8') as f:
+                json.dump(folder_result, f, ensure_ascii=False, indent=2)
+            print(f"已保存: {result_file}")
 
-        # 保存汇总结果（Markdown）
         summary_file = output_path / "summary.md"
         with open(summary_file, 'w', encoding='utf-8') as f:
-            # 标题和基本信息
             f.write(f"# LawShift 数据集评估报告\n\n")
             f.write(f"**模型路径**: {self.model_path}\n\n")
             f.write(f"**评估时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
 
-            # 统计总体结果
             total_orig_correct = 0
             total_orig_count = 0
             total_pois_correct = 0
             total_pois_count = 0
 
-            # 各文件夹评估结果表格
             f.write(f"## 各文件夹评估结果\n\n")
             f.write(f"| 文件夹名称 | Label Type | Original | Poisoned | Comparison |\n")
             f.write(f"|-----------|-----------|----------|----------|------------|\n")
@@ -609,30 +599,24 @@ class LawShiftEvaluator:
                 folder_name = results["folder"]
                 label_type = results.get("label_type", "")
 
-                # Original结果
                 orig = results["original"]
                 orig_text = f"{orig['correct']}/{orig['total']} ({orig.get('accuracy', 0):.2%})"
 
-                # Poisoned结果
                 pois = results["poisoned"]
                 pois_text = f"{pois['correct']}/{pois['total']} ({pois.get('accuracy', 0):.2%})"
 
-                # 对比分析
                 comparison_text = ""
                 if orig['total'] > 0 and pois['total'] > 0:
                     accuracy_diff = pois.get('accuracy', 0) - orig.get('accuracy', 0)
                     comparison_text = f"{accuracy_diff:+.2%}"
 
-                # 写入表格行
                 f.write(f"| {folder_name} | {label_type} | {orig_text} | {pois_text} | {comparison_text} |\n")
 
-                # 累加统计
                 total_orig_correct += orig['correct']
                 total_orig_count += orig['total']
                 total_pois_correct += pois['correct']
                 total_pois_count += pois['total']
 
-            # 总体统计表格
             f.write(f"\n## 总体统计\n\n")
             f.write(f"| 文件夹名称 | Label Type | Original | Poisoned | Comparison |\n")
             f.write(f"|-----------|-----------|----------|----------|------------|\n")
@@ -686,6 +670,13 @@ def main():
         action="store_true",
         help="是否使用 Flash Attention 2（需要先安装 flash-attn）"
     )
+    parser.add_argument(
+        "--evaluate_type",
+        type=str,
+        default="all",
+        choices=["original", "poisoned", "all"],
+        help="评估类型：original(仅原始数据)、poisoned(仅投毒数据)或all(全部)"
+    )
 
     args = parser.parse_args()
 
@@ -700,21 +691,19 @@ def main():
     print(f"Flash Attention: {args.use_flash_attn}")
     print("="*80)
 
-    # 创建评估器
     evaluator = LawShiftEvaluator(
         args.model_path,
         device=args.device,
         use_flash_attn=args.use_flash_attn
     )
 
-    # 评估所有数据
     all_results, results_dir = evaluator.evaluate_all(
         args.dataset_root,
         batch_size=args.batch_size,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        evaluate_type=args.evaluate_type
     )
 
-    # 最终再保存一次（确保完整）
     evaluator.save_results(all_results, results_dir)
 
     print("\n评估完成！")
