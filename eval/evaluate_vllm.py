@@ -13,11 +13,11 @@ from vllm import LLM, SamplingParams
 from tqdm import tqdm
 
 try:
-    from ..prompt_template import SYSTEM_PROMPT, format_user_prompt, format_articles
+    from ..prompt_template import SYSTEM_PROMPT, format_user_prompt, format_user_prompt_poisoned, format_articles
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from prompt_template import SYSTEM_PROMPT, format_user_prompt, format_articles
+    from prompt_template import SYSTEM_PROMPT, format_user_prompt, format_user_prompt_poisoned, format_articles
 
 
 class LawShiftEvaluatorVLLM:
@@ -260,7 +260,7 @@ class LawShiftEvaluatorVLLM:
 
         if evaluate_type in ["poisoned", "all"]:
             print(f"\n评估 poisoned.json (共{len(data_pois)}条)")
-            self._evaluate_split(data_pois, articles_pois, results["poisoned"], batch_size, "Poisoned", label_type)
+            self._evaluate_split(data_pois, articles_pois, results["poisoned"], batch_size, "Poisoned", label_type, articles_orig)
 
         # 计算准确率
         if results["original"]["total"] > 0:
@@ -274,7 +274,7 @@ class LawShiftEvaluatorVLLM:
 
         return results
 
-    def _evaluate_split(self, data: List[Dict], articles: Dict, results: Dict, batch_size: int, split_name: str, label_type: str = None):
+    def _evaluate_split(self, data: List[Dict], articles: Dict, results: Dict, batch_size: int, split_name: str, label_type: str = None, articles_original: Dict = None):
         """
         评估一个数据分支（使用vLLM批量推理）
 
@@ -285,6 +285,7 @@ class LawShiftEvaluatorVLLM:
             batch_size: 批量大小
             split_name: 分割名称
             label_type: 标签类型
+            articles_original: 原始法条字典（仅在 split_name="Poisoned" 时需要）
         """
         for i in tqdm(range(0, len(data), batch_size), desc=split_name):
             batch = data[i:i + batch_size]
@@ -293,8 +294,17 @@ class LawShiftEvaluatorVLLM:
             for item in batch:
                 fact = item["fact"]
                 article_ids = item["relevant_articles"]
-                articles_text = format_articles(articles, article_ids)
-                user_prompt = format_user_prompt(fact, articles_text)
+
+                # 根据 split_name 选择不同的 prompt 构建方式
+                if split_name == "Poisoned" and articles_original is not None:
+                    # 对于 Poisoned 数据，使用旧法+新法的模板
+                    articles_text_original = format_articles(articles_original, article_ids)
+                    articles_text_poisoned = format_articles(articles, article_ids)
+                    user_prompt = format_user_prompt_poisoned(fact, articles_text_original, articles_text_poisoned)
+                else:
+                    # 对于 Original 数据，使用标准模板
+                    articles_text = format_articles(articles, article_ids)
+                    user_prompt = format_user_prompt(fact, articles_text)
 
                 messages = [
                     {"role": "system", "content": SYSTEM_PROMPT},
@@ -400,7 +410,7 @@ class LawShiftEvaluatorVLLM:
                 elif label_type == "NX":
                     print(f"  预测结果为 'V | {{刑期T}}'，且 T > 36 → 成功")
 
-    def evaluate_all(self, dataset_root: str = "./LawShift", batch_size: int = 32, output_dir: str = "./results", evaluate_type: str = "all") -> Tuple[List[Dict[str, Any]], str]:
+    def evaluate_all(self, dataset_root: str = "./LawShift", batch_size: int = 32, output_dir: str = "./results", evaluate_type: str = "all", resume: bool = False) -> Tuple[List[Dict[str, Any]], str]:
         """
         评估所有子文件夹
 
@@ -409,6 +419,7 @@ class LawShiftEvaluatorVLLM:
             batch_size: 批量大小
             output_dir: 输出目录
             evaluate_type: 评估类型 (original/poisoned/all)
+            resume: 是否从已有结果恢复
 
         Returns:
             (所有评估结果列表, 结果保存目录)
@@ -419,12 +430,45 @@ class LawShiftEvaluatorVLLM:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         model_name = Path(self.model_path).name
 
-        results_dir = Path(output_dir) / f"{model_name}_{timestamp}"
-        results_dir.mkdir(parents=True, exist_ok=True)
+        # 如果是resume模式，使用已有的output_dir；否则创建新的带时间戳的目录
+        if resume:
+            results_dir = Path(output_dir)
+            if not results_dir.exists():
+                print(f"警告: 指定的output_dir不存在: {results_dir}")
+                print("将创建新的评估目录...")
+                results_dir = Path(output_dir) / f"{model_name}_{timestamp}"
+                results_dir.mkdir(parents=True, exist_ok=True)
+                resume = False
+            else:
+                print(f"\n从已有目录恢复评估: {results_dir}")
+                # 加载已有的评估结果
+                for result_file in results_dir.glob("*_results.json"):
+                    try:
+                        with open(result_file, 'r', encoding='utf-8') as f:
+                            result = json.load(f)
+                            all_results.append(result)
+                        print(f"已加载: {result_file.name}")
+                    except Exception as e:
+                        print(f"加载 {result_file.name} 时出错: {e}")
+                print(f"已加载 {len(all_results)} 个已完成的评估结果")
+        else:
+            results_dir = Path(output_dir) / f"{model_name}_{timestamp}"
+            results_dir.mkdir(parents=True, exist_ok=True)
+
         print(f"\n结果将保存至: {results_dir}")
+
+        # 获取已完成的文件夹名称
+        completed_folders = {result["folder"] for result in all_results}
 
         for folder in sorted(dataset_path.iterdir()):
             if folder.is_dir() and (folder / "original.json").exists():
+                folder_name = folder.name
+
+                # 如果是resume模式且该文件夹已完成，则跳过
+                if resume and folder_name in completed_folders:
+                    print(f"\n跳过已完成的文件夹: {folder_name}")
+                    continue
+
                 try:
                     results = self.evaluate_dataset(str(folder), batch_size=batch_size, evaluate_type=evaluate_type)
                     all_results.append(results)
@@ -571,6 +615,11 @@ def main():
         choices=["original", "poisoned", "all"],
         help="评估类型：original(仅原始数据)、poisoned(仅投毒数据)或all(全部)"
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="从output_dir恢复之前的评估进度，跳过已完成的文件夹"
+    )
 
     args = parser.parse_args()
 
@@ -595,7 +644,8 @@ def main():
         args.dataset_root,
         batch_size=args.batch_size,
         output_dir=args.output_dir,
-        evaluate_type=args.evaluate_type
+        evaluate_type=args.evaluate_type,
+        resume=args.resume
     )
 
     evaluator.save_results(all_results, results_dir)

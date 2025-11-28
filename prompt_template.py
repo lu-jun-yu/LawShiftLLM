@@ -80,7 +80,7 @@ USER_PROMPT_TEMPLATE = """请你完成以下法律判决预测任务：
 【相关法条】
 {relevant_articles}
 
-请根据上述案件事实和相关法条，进行法律判决预测。
+请依据上述相关法条，对案件事实进行法律判决预测。
 
 请严格按照系统提示的格式输出你的分析和判决结果。"""
 
@@ -121,6 +121,50 @@ def format_articles(article_dict: dict, article_ids: list) -> str:
             formatted_articles.append(f"【{article_id}】（法条内容未找到）")
 
     return "\n".join(formatted_articles)
+
+
+# ========== Poisoned数据专用提示词 ==========
+# 用于测评poisoned数据的用户提示词模板（同时提供旧法和新法）
+USER_PROMPT_TEMPLATE_POISONED = """请你完成以下法律判决预测任务：
+
+【案件事实】
+{fact}
+
+【相关法条】
+- 旧法：
+{relevant_articles_original}
+
+- 新法：
+{relevant_articles_poisoned}
+
+【重要说明】
+上述新法是对旧法的最新修订版本。在进行法律判决预测时，请务必依据最新的新法进行分析和判决，而非旧法。新法的规定具有最高效力，应当作为本案判决的法律依据。
+
+请依据上述新法（而非旧法），对案件事实进行法律判决预测。
+
+请严格按照系统提示的格式输出你的分析和判决结果。"""
+
+
+def format_user_prompt_poisoned(fact: str, relevant_articles_original: str,
+                                  relevant_articles_poisoned: str) -> str:
+    """
+    格式化用户提示词（用于poisoned数据测评）
+
+    此函数用于构建包含旧法和新法对比的提示词，强调模型应依据新法进行判决。
+
+    Args:
+        fact: 案件事实描述
+        relevant_articles_original: 原始法条内容（旧法，已格式化）
+        relevant_articles_poisoned: 修改后的法条内容（新法，已格式化）
+
+    Returns:
+        格式化后的用户提示词
+    """
+    return USER_PROMPT_TEMPLATE_POISONED.format(
+        fact=fact,
+        relevant_articles_original=relevant_articles_original,
+        relevant_articles_poisoned=relevant_articles_poisoned
+    )
 
 
 # ========== 训练版提示词 ==========
