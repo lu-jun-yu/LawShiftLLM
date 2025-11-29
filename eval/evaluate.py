@@ -153,10 +153,10 @@ class LawShiftEvaluator:
                 messages,
                 tokenize=False,
                 add_generation_prompt=True
-            )
+            ) + " <think>\n"
         else:
             # 如果没有chat template，手动构建
-            prompt = f"{SYSTEM_PROMPT}\n\nUser: {user_prompt}\n\nAssistant:"
+            prompt = f"{SYSTEM_PROMPT}\n\nUser: {user_prompt}\n\nAssistant: <think>\n"
 
         # 编码并移到GPU
         inputs = self.tokenizer(prompt, return_tensors="pt", padding=True)
@@ -423,9 +423,9 @@ class LawShiftEvaluator:
                         messages,
                         tokenize=False,
                         add_generation_prompt=True
-                    )
+                    ) + " <think>\n"
                 else:
-                    prompt = f"{SYSTEM_PROMPT}\n\nUser: {user_prompt}\n\nAssistant:"
+                    prompt = f"{SYSTEM_PROMPT}\n\nUser: {user_prompt}\n\nAssistant: <think>\n"
 
                 prompts.append(prompt)
 
