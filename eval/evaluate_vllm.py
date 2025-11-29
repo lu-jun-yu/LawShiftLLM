@@ -517,57 +517,6 @@ class LawShiftEvaluatorVLLM:
                 json.dump(folder_result, f, ensure_ascii=False, indent=2)
             print(f"已保存: {result_file}")
 
-        summary_file = output_path / "summary.md"
-        with open(summary_file, 'w', encoding='utf-8') as f:
-            f.write(f"# LawShift 数据集评估报告\n\n")
-            f.write(f"**模型路径**: {self.model_path}\n\n")
-            f.write(f"**评估时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-
-            total_orig_correct = 0
-            total_orig_count = 0
-            total_pois_correct = 0
-            total_pois_count = 0
-
-            f.write(f"## 各文件夹评估结果\n\n")
-            f.write(f"| 文件夹名称 | Label Type | Original | Poisoned | Comparison |\n")
-            f.write(f"|-----------|-----------|----------|----------|------------|\n")
-
-            for results in all_results:
-                folder_name = results["folder"]
-                label_type = results.get("label_type", "")
-
-                orig = results["original"]
-                orig_text = f"{orig['correct']}/{orig['total']} ({orig.get('accuracy', 0):.2%})"
-
-                pois = results["poisoned"]
-                pois_text = f"{pois['correct']}/{pois['total']} ({pois.get('accuracy', 0):.2%})"
-
-                comparison_text = ""
-                if orig['total'] > 0 and pois['total'] > 0:
-                    accuracy_diff = pois.get('accuracy', 0) - orig.get('accuracy', 0)
-                    comparison_text = f"{accuracy_diff:+.2%}"
-
-                f.write(f"| {folder_name} | {label_type} | {orig_text} | {pois_text} | {comparison_text} |\n")
-
-                total_orig_correct += orig['correct']
-                total_orig_count += orig['total']
-                total_pois_correct += pois['correct']
-                total_pois_count += pois['total']
-
-            f.write(f"\n## 总体统计\n\n")
-            f.write(f"| 文件夹名称 | Label Type | Original | Poisoned | Comparison |\n")
-            f.write(f"|-----------|-----------|----------|----------|------------|\n")
-
-            if total_orig_count > 0 and total_pois_count > 0:
-                orig_acc = total_orig_correct / total_orig_count
-                pois_acc = total_pois_correct / total_pois_count
-                orig_text = f"{total_orig_correct}/{total_orig_count} ({orig_acc:.2%})"
-                pois_text = f"{total_pois_correct}/{total_pois_count} ({pois_acc:.2%})"
-                comparison_text = f"{(pois_acc - orig_acc):+.2%}"
-                f.write(f"| **总体** | | {orig_text} | {pois_text} | {comparison_text} |\n")
-
-        print(f"汇总结果已保存至: {summary_file}")
-
 
 def main():
     """主函数"""
@@ -647,8 +596,6 @@ def main():
         evaluate_type=args.evaluate_type,
         resume=args.resume
     )
-
-    evaluator.save_results(all_results, results_dir)
 
     print("\n评估完成！")
 
