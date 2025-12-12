@@ -69,14 +69,24 @@ def generate_summary(results_dir: str):
             orig = results["original"]
             if orig['total'] > 0:
                 orig_acc = orig.get('accuracy', 0) if orig.get('accuracy') is not None else 0
-                orig_text = f"{orig['correct']}/{orig['total']} ({orig_acc:.2%})"
+                orig_correct = orig['correct']
+                # 处理 correct 可能是浮点数的情况（多次采样时）
+                if isinstance(orig_correct, float) and not orig_correct.is_integer():
+                    orig_text = f"{orig_correct:.2f}/{orig['total']} ({orig_acc:.2%})"
+                else:
+                    orig_text = f"{int(orig_correct)}/{orig['total']} ({orig_acc:.2%})"
             else:
                 orig_text = "0/0 (N/A)"
 
             pois = results["poisoned"]
             if pois['total'] > 0:
                 pois_acc = pois.get('accuracy', 0) if pois.get('accuracy') is not None else 0
-                pois_text = f"{pois['correct']}/{pois['total']} ({pois_acc:.2%})"
+                pois_correct = pois['correct']
+                # 处理 correct 可能是浮点数的情况（多次采样时）
+                if isinstance(pois_correct, float) and not pois_correct.is_integer():
+                    pois_text = f"{pois_correct:.2f}/{pois['total']} ({pois_acc:.2%})"
+                else:
+                    pois_text = f"{int(pois_correct)}/{pois['total']} ({pois_acc:.2%})"
             else:
                 pois_text = "0/0 (N/A)"
 
@@ -105,11 +115,19 @@ def generate_summary(results_dir: str):
 
             if total_orig_count > 0:
                 orig_acc = total_orig_correct / total_orig_count
-                orig_text = f"{total_orig_correct}/{total_orig_count} ({orig_acc:.2%})"
+                # 处理 correct 可能是浮点数的情况（多次采样时）
+                if isinstance(total_orig_correct, float) and not total_orig_correct.is_integer():
+                    orig_text = f"{total_orig_correct:.2f}/{total_orig_count} ({orig_acc:.2%})"
+                else:
+                    orig_text = f"{int(total_orig_correct)}/{total_orig_count} ({orig_acc:.2%})"
 
             if total_pois_count > 0:
                 pois_acc = total_pois_correct / total_pois_count
-                pois_text = f"{total_pois_correct}/{total_pois_count} ({pois_acc:.2%})"
+                # 处理 correct 可能是浮点数的情况（多次采样时）
+                if isinstance(total_pois_correct, float) and not total_pois_correct.is_integer():
+                    pois_text = f"{total_pois_correct:.2f}/{total_pois_count} ({pois_acc:.2%})"
+                else:
+                    pois_text = f"{int(total_pois_correct)}/{total_pois_count} ({pois_acc:.2%})"
 
             if total_orig_count > 0 and total_pois_count > 0:
                 comparison_text = f"{(pois_acc - orig_acc):+.2%}"
