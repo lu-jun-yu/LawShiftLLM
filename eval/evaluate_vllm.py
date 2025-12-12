@@ -11,6 +11,7 @@ from typing import Dict, List, Tuple, Any
 from datetime import datetime
 from vllm import LLM, SamplingParams
 from tqdm import tqdm
+import yaml
 
 try:
     from ..prompt_template import SYSTEM_PROMPT, format_user_prompt, format_user_prompt_poisoned, format_articles
@@ -22,7 +23,9 @@ except ImportError:
 
 class LawShiftEvaluatorVLLM:
 
-    def __init__(self, model_path: str, tensor_parallel_size: int = 1, gpu_memory_utilization: float = 0.9):
+    def __init__(self, model_path: str, tensor_parallel_size: int = 1, gpu_memory_utilization: float = 0.9,
+                 temperature: float = 0.7, top_p: float = 0.9, max_tokens: int = 1024,
+                 num_samples: int = 1):
         """
         初始化评估器（使用vLLM）
 
@@ -30,9 +33,17 @@ class LawShiftEvaluatorVLLM:
             model_path: 模型路径
             tensor_parallel_size: 张量并行数（多GPU时使用）
             gpu_memory_utilization: GPU显存利用率 (0.0-1.0)
+            temperature: 温度参数
+            top_p: top-p采样参数
+            max_tokens: 最大生成token数
+            num_samples: 采样次数（>1时对同一prompt多次采样，指标取平均值）
         """
         print(f"正在加载模型 (vLLM): {model_path}")
         self.model_path = model_path
+        self.temperature = temperature
+        self.top_p = top_p
+        self.max_tokens = max_tokens
+        self.num_samples = num_samples
 
         # 加载 label 映射
         self.label_mapping = {}
@@ -91,25 +102,21 @@ class LawShiftEvaluatorVLLM:
 
         return articles_original, articles_poisoned, data_original, data_poisoned
 
-    def generate_predictions_batch(self, prompts: List[str], temperature: float = 0.7,
-                                   top_p: float = 0.9, max_tokens: int = 1024) -> List[str]:
+    def generate_predictions_batch(self, prompts: List[str]) -> List[str]:
         """
         批量生成预测（使用vLLM）
 
         Args:
             prompts: 提示词列表
-            temperature: 温度参数
-            top_p: top-p采样参数
-            max_tokens: 最大生成token数
 
         Returns:
             生成的文本列表
         """
         # 设置采样参数
         sampling_params = SamplingParams(
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            max_tokens=self.max_tokens,
         )
 
         # 批量生成
@@ -276,7 +283,7 @@ class LawShiftEvaluatorVLLM:
 
     def _evaluate_split(self, data: List[Dict], articles: Dict, results: Dict, batch_size: int, split_name: str, label_type: str = None, articles_original: Dict = None):
         """
-        评估一个数据分支（使用vLLM批量推理）
+        评估一个数据分支（使用vLLM批量推理，支持多次采样）
 
         Args:
             data: 数据列表
@@ -287,6 +294,13 @@ class LawShiftEvaluatorVLLM:
             label_type: 标签类型
             articles_original: 原始法条字典（仅在 split_name="Poisoned" 时需要）
         """
+        num_samples = self.num_samples
+
+        # 如果多次采样，初始化采样结果存储
+        if num_samples > 1:
+            print(f"  使用 {num_samples} 次采样")
+            results["num_samples"] = num_samples
+
         for i in tqdm(range(0, len(data), batch_size), desc=split_name):
             batch = data[i:i + batch_size]
 
@@ -323,34 +337,63 @@ class LawShiftEvaluatorVLLM:
                 prompts.append(prompt)
 
             try:
-                responses = self.generate_predictions_batch(prompts)
+                # 多次采样
+                all_sample_results = []  # [sample_idx][item_idx] = (pred_violation, pred_prison, response)
 
-                for item, prompt, response in zip(batch, prompts, responses):
+                for sample_idx in range(num_samples):
+                    responses = self.generate_predictions_batch(prompts)
+                    sample_results = []
+                    for response in responses:
+                        pred_violation, pred_prison = self.parse_prediction(response)
+                        sample_results.append((pred_violation, pred_prison, response))
+                    all_sample_results.append(sample_results)
+
+                # 处理每个样本的多次采样结果
+                for item_idx, (item, prompt) in enumerate(zip(batch, prompts)):
                     fact = item["fact"]
                     article_ids = item["relevant_articles"]
-
-                    pred_violation, pred_prison = self.parse_prediction(response)
-
-                    is_correct = self.check_prediction_success(
-                        pred_violation, pred_prison, label_type, split_name
-                    )
-
-                    if is_correct:
-                        results["correct"] += 1
-
                     relevant_articles_texts = [articles.get(str(aid), f"Article {aid} not found") for aid in article_ids]
 
-                    results["predictions"].append({
+                    # 收集该样本在所有采样中的结果
+                    pred_violations = []
+                    pred_prisons = []
+                    full_responses = []
+                    correct_count = 0
+
+                    for sample_idx in range(num_samples):
+                        pred_violation, pred_prison, response = all_sample_results[sample_idx][item_idx]
+                        pred_violations.append(pred_violation)
+                        pred_prisons.append(pred_prison)  # 不犯罪时为None
+                        full_responses.append(response)
+
+                        is_correct = self.check_prediction_success(
+                            pred_violation, pred_prison, label_type, split_name
+                        )
+                        if is_correct:
+                            correct_count += 1
+
+                    # 计算该样本的平均准确率
+                    avg_correct = correct_count / num_samples
+                    results["correct"] += avg_correct
+
+                    prediction_record = {
                         "sample_id": results["total"],
-                        "pred_violation": pred_violation,
-                        "pred_prison": pred_prison,
-                        "is_correct": is_correct,
+                        "pred_violation": pred_violations if num_samples > 1 else pred_violations[0],
+                        "pred_prison": pred_prisons if num_samples > 1 else pred_prisons[0],
+                        "is_correct": correct_count == num_samples if num_samples == 1 else None,
                         "fact": fact,
                         "relevant_articles": relevant_articles_texts,
                         "full_prompt": prompt,
-                        "full_response": response
-                    })
+                        "full_response": full_responses if num_samples > 1 else full_responses[0]
+                    }
 
+                    # 如果多次采样，添加额外信息
+                    if num_samples > 1:
+                        prediction_record["num_samples"] = num_samples
+                        prediction_record["correct_count"] = correct_count
+                        prediction_record["avg_correct"] = avg_correct
+
+                    results["predictions"].append(prediction_record)
                     results["total"] += 1
 
             except Exception as e:
@@ -518,83 +561,92 @@ class LawShiftEvaluatorVLLM:
             print(f"已保存: {result_file}")
 
 
+def load_config(config_path: str) -> dict:
+    """
+    从YAML文件加载配置
+
+    Args:
+        config_path: 配置文件路径
+
+    Returns:
+        配置字典
+    """
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description="LawShift数据集评估脚本（vLLM加速版）")
     parser.add_argument(
-        "--model_path",
+        "--config",
         type=str,
-        default="models/Qwen3-0.6B",
-        help="模型路径"
+        default="config/evaluate_vllm.yaml",
+        help="配置文件路径（YAML格式）"
     )
-    parser.add_argument(
-        "--dataset_root",
-        type=str,
-        default="./LawShift",
-        help="数据集根目录"
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="./results",
-        help="输出目录"
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=32,
-        help="批量推理的batch size"
-    )
-    parser.add_argument(
-        "--tensor_parallel_size",
-        type=int,
-        default=1,
-        help="张量并行大小（多GPU时使用）"
-    )
-    parser.add_argument(
-        "--gpu_memory_utilization",
-        type=float,
-        default=0.9,
-        help="GPU显存利用率 (0.0-1.0)"
-    )
-    parser.add_argument(
-        "--evaluate_type",
-        type=str,
-        default="all",
-        choices=["original", "poisoned", "all"],
-        help="评估类型：original(仅原始数据)、poisoned(仅投毒数据)或all(全部)"
-    )
-    parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="从output_dir恢复之前的评估进度，跳过已完成的文件夹"
-    )
-
     args = parser.parse_args()
+
+    # 加载配置文件
+    config_path = Path(args.config)
+    if not config_path.exists():
+        print(f"错误: 配置文件不存在 ({config_path})")
+        return
+
+    print(f"从配置文件加载参数: {config_path}")
+    config = load_config(str(config_path))
+
+    # 从配置文件提取参数
+    model_path = config["model"]["model_path"]
+    tensor_parallel_size = config["model"]["tensor_parallel_size"]
+    gpu_memory_utilization = config["model"]["gpu_memory_utilization"]
+
+    dataset_root = config["data"]["dataset_root"]
+    output_dir = config["data"]["output_dir"]
+
+    batch_size = config["inference"]["batch_size"]
+    num_samples = config["inference"]["num_samples"]
+    temperature = config["inference"]["temperature"]
+    top_p = config["inference"]["top_p"]
+    max_tokens = config["inference"]["max_tokens"]
+
+    evaluate_type = config["evaluation"]["evaluate_type"]
+    resume = config["evaluation"]["resume"]
 
     print("="*80)
     print("LawShift 法律判决预测评估 (vLLM加速版)")
     print("="*80)
-    print(f"模型路径: {args.model_path}")
-    print(f"数据集路径: {args.dataset_root}")
-    print(f"输出目录: {args.output_dir}")
-    print(f"批量大小: {args.batch_size}")
-    print(f"张量并行大小: {args.tensor_parallel_size}")
-    print(f"GPU显存利用率: {args.gpu_memory_utilization}")
+    print(f"配置文件: {config_path}")
+    print(f"模型路径: {model_path}")
+    print(f"数据集路径: {dataset_root}")
+    print(f"输出目录: {output_dir}")
+    print(f"批量大小: {batch_size}")
+    print(f"张量并行大小: {tensor_parallel_size}")
+    print(f"GPU显存利用率: {gpu_memory_utilization}")
+    print(f"采样次数: {num_samples}")
+    print(f"温度: {temperature}")
+    print(f"Top-p: {top_p}")
+    print(f"最大token数: {max_tokens}")
+    print(f"评估类型: {evaluate_type}")
+    print(f"恢复模式: {resume}")
     print("="*80)
 
     evaluator = LawShiftEvaluatorVLLM(
-        args.model_path,
-        tensor_parallel_size=args.tensor_parallel_size,
-        gpu_memory_utilization=args.gpu_memory_utilization
+        model_path,
+        tensor_parallel_size=tensor_parallel_size,
+        gpu_memory_utilization=gpu_memory_utilization,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        num_samples=num_samples
     )
 
     all_results, results_dir = evaluator.evaluate_all(
-        args.dataset_root,
-        batch_size=args.batch_size,
-        output_dir=args.output_dir,
-        evaluate_type=args.evaluate_type,
-        resume=args.resume
+        dataset_root,
+        batch_size=batch_size,
+        output_dir=output_dir,
+        evaluate_type=evaluate_type,
+        resume=resume
     )
 
     print("\n评估完成！")

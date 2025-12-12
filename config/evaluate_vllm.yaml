@@ -1,0 +1,26 @@
+# LawShift 评估配置文件
+# 用于 evaluate_vllm.py (vLLM加速版本)
+
+# 模型配置
+model:
+  model_path: "models/Qwen3-0.6B"  # 模型路径
+  tensor_parallel_size: 1          # 张量并行大小（多GPU时使用）
+  gpu_memory_utilization: 0.9      # GPU显存利用率 (0.0-1.0)
+
+# 数据配置
+data:
+  dataset_root: "./LawShift"       # 数据集根目录
+  output_dir: "./results"          # 输出目录
+
+# 推理配置
+inference:
+  batch_size: 32                   # 批量推理的batch size
+  num_samples: 1                   # 采样次数（>1时对同一prompt多次采样，指标取平均值）
+  temperature: 0.7                 # 温度参数
+  top_p: 0.9                       # top-p采样参数
+  max_tokens: 1024                 # 最大生成token数
+
+# 评估配置
+evaluation:
+  evaluate_type: "all"             # 评估类型: original/poisoned/all
+  resume: false                    # 是否从已有结果恢复
