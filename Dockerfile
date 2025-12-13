@@ -2,15 +2,17 @@
 FROM continuumio/miniconda3
 
 # 2. 将环境配置文件复制到镜像中
-# COPY environment.yml /tmp/environment.yml
+COPY environment_ori.yml /tmp/environment_ori.yml
 COPY requirements.txt /tmp/requirements.txt
 
 # 3. 创建环境并清理缓存（优化层，安装依赖是耗时操作）
 # 将所有安装和清理操作放在一个 RUN 命令中，以减少镜像层数
-# RUN conda env create -f /tmp/environment.yml && conda clean -a -y
+RUN conda env create -f /tmp/environment_ori.yml && conda clean -a -y
+# RUN conda init && conda activate llm
 
 # 4. 激活新环境并在其中运行 Pip 安装 (更容易追踪 Pip 错误)
-RUN /opt/conda/envs/llm/bin/pip install --no-cache-dir -r /tmp/requirements.txt
+RUN /root/anaconda3/envs/llm_ori/bin/pip install -r /tmp/requirements.txt
+# --no-cache-dir
 
 # 5. 设置环境变量，确保容器启动时默认使用 Conda 环境
 ENV PATH /opt/conda/envs/llm/bin:$PATH
