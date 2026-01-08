@@ -26,7 +26,7 @@ class NVEvaluator:
 
     def __init__(self, model_path: str, device: str = "auto", use_flash_attn: bool = False,
                  temperature: float = 0.7, top_p: float = 0.9, max_tokens: int = 1024,
-                 num_samples: int = 1):
+                 num_samples: int = 1, max_prompt_length: int = 0):
         """
         初始化评估器
 
@@ -38,6 +38,7 @@ class NVEvaluator:
             top_p: top-p采样参数
             max_tokens: 最大生成token数
             num_samples: 采样次数（>1时对同一prompt多次采样，指标取平均值）
+            max_prompt_length: 最大prompt长度（token数），0表示不限制
         """
         print(f"正在加载模型: {model_path}")
         self.model_path = model_path
@@ -46,6 +47,7 @@ class NVEvaluator:
         self.top_p = top_p
         self.max_tokens = max_tokens
         self.num_samples = num_samples
+        self.max_prompt_length = max_prompt_length
 
         # 加载法条
         self.articles = {}
@@ -232,12 +234,54 @@ class NVEvaluator:
         print(f"{'='*60}")
 
         data = self.load_nv_data(file_path)
-        print(f"数据条数: {len(data)}")
+        print(f"原始数据条数: {len(data)}")
+
+        # 预处理：构建所有 prompt 并过滤超长的
+        processed_data = []
+        skipped_count = 0
+
+        for item in data:
+            fact = item["fact"]
+            article_ids = item["relevant_articles"]
+
+            # 获取法条内容
+            articles_text = format_articles(self.articles, article_ids)
+            user_prompt = format_user_prompt(fact, articles_text)
+
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt}
+            ]
+
+            if hasattr(self.tokenizer, 'apply_chat_template'):
+                prompt = self.tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True
+                ) + " <think>\n"
+            else:
+                prompt = f"{SYSTEM_PROMPT}\n\nUser: {user_prompt}\n\nAssistant: <think>\n"
+
+            # 检查 prompt 长度
+            if self.max_prompt_length > 0:
+                prompt_tokens = self.tokenizer.encode(prompt, add_special_tokens=False)
+                if len(prompt_tokens) > self.max_prompt_length:
+                    skipped_count += 1
+                    continue
+
+            processed_data.append({
+                "item": item,
+                "prompt": prompt
+            })
+
+        if self.max_prompt_length > 0:
+            print(f"过滤超长prompt后数据条数: {len(processed_data)} (跳过 {skipped_count} 条，超过 {self.max_prompt_length} tokens)")
 
         results = {
             "file": file_name,
             "correct": 0,
             "total": 0,
+            "skipped": skipped_count,
             "predictions": []
         }
 
@@ -246,33 +290,10 @@ class NVEvaluator:
             print(f"  使用 {num_samples} 次采样")
             results["num_samples"] = num_samples
 
-        for i in tqdm(range(0, len(data), batch_size), desc=file_name):
-            batch = data[i:i + batch_size]
-
-            prompts = []
-            for item in batch:
-                fact = item["fact"]
-                article_ids = item["relevant_articles"]
-
-                # 获取法条内容
-                articles_text = format_articles(self.articles, article_ids)
-                user_prompt = format_user_prompt(fact, articles_text)
-
-                messages = [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt}
-                ]
-
-                if hasattr(self.tokenizer, 'apply_chat_template'):
-                    prompt = self.tokenizer.apply_chat_template(
-                        messages,
-                        tokenize=False,
-                        add_generation_prompt=True
-                    ) + " <think>\n"
-                else:
-                    prompt = f"{SYSTEM_PROMPT}\n\nUser: {user_prompt}\n\nAssistant: <think>\n"
-
-                prompts.append(prompt)
+        for i in tqdm(range(0, len(processed_data), batch_size), desc=file_name):
+            batch_data = processed_data[i:i + batch_size]
+            batch = [d["item"] for d in batch_data]
+            prompts = [d["prompt"] for d in batch_data]
 
             try:
                 # 多次采样
@@ -599,7 +620,8 @@ def main():
                 "num_samples": 1,
                 "temperature": 0.7,
                 "top_p": 0.9,
-                "max_tokens": 1024
+                "max_tokens": 1024,
+                "max_prompt_length": 0
             },
             "evaluation": {
                 "resume": False
@@ -619,6 +641,7 @@ def main():
     temperature = config["inference"]["temperature"]
     top_p = config["inference"]["top_p"]
     max_tokens = config["inference"]["max_tokens"]
+    max_prompt_length = config["inference"].get("max_prompt_length", 0)
 
     resume = config["evaluation"]["resume"]
 
@@ -635,6 +658,7 @@ def main():
     print(f"温度: {temperature}")
     print(f"Top-p: {top_p}")
     print(f"最大token数: {max_tokens}")
+    print(f"最大prompt长度: {max_prompt_length if max_prompt_length > 0 else '不限制'}")
     print(f"恢复模式: {resume}")
     print("="*80)
 
@@ -645,7 +669,8 @@ def main():
         temperature=temperature,
         top_p=top_p,
         max_tokens=max_tokens,
-        num_samples=num_samples
+        num_samples=num_samples,
+        max_prompt_length=max_prompt_length
     )
 
     all_results, results_dir = evaluator.evaluate_all(
